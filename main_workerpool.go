@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -20,22 +21,41 @@ func crawl(wId int, jobs <-chan Site, results chan<- Result, wg *sync.WaitGroup)
 
 	for site := range jobs {
 		log.Printf("=======Worker ID: %d ===========\n", wId)
-		resp, err := http.Get(site.URL)
 
-		if err != nil {
-			log.Println(err.Error())
+		// retry jika ada error
+		for {
+			var outerError error
+			func(outerError *error) {
+				defer func() {
+					if err := recover(); err != nil {
+						*outerError = fmt.Errorf("%v", err)
+					}
+				}()
+
+				resp, err := http.Get(site.URL)
+
+				if err != nil {
+					log.Println(err.Error())
+				}
+				results <- Result{Status: resp.StatusCode, Linkwebsite: site.URL}
+			}(&outerError)
+			if outerError == nil {
+				break
+			}
 		}
-		results <- Result{Status: resp.StatusCode, Linkwebsite: site.URL}
+
 	}
 	wg.Done()
 }
 func main() {
 	fmt.Println("Worker pools in go")
-	worker := 10
+	runtime.GOMAXPROCS(10)
 	totals := 88
+	worker := totals
+	buffer := totals + 1
 	start := time.Now()
-	jobs := make(chan Site, 90)
-	results := make(chan Result, 90)
+	jobs := make(chan Site, buffer)
+	results := make(chan Result, buffer)
 	wg := &sync.WaitGroup{}
 
 	for w := 0; w < worker; w++ {
